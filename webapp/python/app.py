@@ -548,12 +548,6 @@ def post_index():
 @app.route("/admin/export-images", methods=["POST"])
 def export_images():
     """全ての画像をDBから取得してファイルシステムに保存するAPI"""
-    me = get_session_user()
-    if not me:
-        return flask.redirect("/login")
-
-    if flask.request.form["csrf_token"] != flask.session["csrf_token"]:
-        flask.abort(422)
 
     try:
         # 画像保存ディレクトリを作成
