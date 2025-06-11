@@ -1,6 +1,7 @@
 {% extends 'layout.html' %}
 {% block body %}
 <div>
+  <h2>ユーザー管理</h2>
   <form method="post" action="/admin/banned">
     {% for u in users %}
     <div>
@@ -10,6 +11,17 @@
     <div class="form-submit">
       <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
       <input type="submit" name="submit" value="submit">
+    </div>
+  </form>
+</div>
+
+<div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #ccc;">
+  <h2>画像管理</h2>
+  <p>全ての画像をDBからファイルシステムに一括エクスポートします。これによりアクセス性能が向上します。</p>
+  <form method="post" action="/admin/export-images">
+    <div class="form-submit">
+      <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+      <input type="submit" name="submit" value="画像を一括エクスポート" onclick="return confirm('全ての画像をファイルシステムに保存します。よろしいですか？')">
     </div>
   </form>
 </div>
