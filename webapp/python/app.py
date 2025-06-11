@@ -3,7 +3,7 @@ import os
 import pathlib
 import re
 import shlex
-import subprocess
+import hashlib
 import tempfile
 import json
 import base64
@@ -159,13 +159,9 @@ def validate_user(account_name: str, password: str):
 
 
 def digest(src: str):
-    # opensslのバージョンによっては (stdin)= というのがつくので取る
-    out = subprocess.check_output(
-        f"printf %s {shlex.quote(src)} | openssl dgst -sha512 | sed 's/^.*= //'",
-        shell=True,
-        encoding="utf-8",
-    )
-    return out.strip()
+    src_bytes = src.encode('utf-8')
+    hased_str = hashlib.sha512(src_bytes).hexdigest()
+    return hased_str.strip()
 
 
 def calculate_salt(account_name: str):
