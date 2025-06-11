@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import json
 import base64
+import logging
 
 import flask
 import MySQLdb.cursors
@@ -87,24 +88,9 @@ def memcache():
             conf["address"], 
             no_delay=True, 
             default_noreply=False,
-            serializer=json_serializer,
-            deserializer=json_deserializer
         )
     return _mcclient
 
-
-def json_serializer(key, value):
-    if isinstance(value, str):
-        return value.encode('utf-8'), 1
-    return json.dumps(value).encode('utf-8'), 2
-
-
-def json_deserializer(key, value, flags):
-    if flags == 1:
-        return value.decode('utf-8')
-    if flags == 2:
-        return json.loads(value.decode('utf-8'))
-    return value
 
 from opentelemetry import trace, metrics
 from opentelemetry.sdk.resources import Resource
@@ -144,6 +130,13 @@ def otel_setup(app):
     FlaskInstrumentor().instrument_app(app)
     MySQLInstrumentor().instrument()
 
+def log_setup(app):
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.DEBUG)
+    fmt = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+    handler.setFormatter(fmt)
+    app.logger.addHandler(handler)
+    app.logger.setLevel(logging.DEBUG)
 
 def try_login(account_name, password):
     cur = db().cursor()
@@ -186,20 +179,20 @@ def calculate_passhash(account_name: str, password: str):
 def get_session_user():
     user = flask.session.get("user")
     if user:
-        # セッションにキャッシュされたユーザー情報があるかチェック
-        cached_user = flask.session.get("user_data")
-        if cached_user:
-            return cached_user
+        # # セッションにキャッシュされたユーザー情報があるかチェック
+        # cached_user = flask.session.get("user_data")
+        # if cached_user:
+        #     return cached_user
             
         # キャッシュがない場合のみDBアクセス
         cur = db().cursor()
         cur.execute("SELECT * FROM `users` WHERE `id` = %s", (user["id"],))
         user_data = cur.fetchone()
         
-        # セッションにキャッシュ
-        if user_data:
-            flask.session["user_data"] = user_data
-        
+        ## セッションにキャッシュ
+        #if user_data:
+        #    flask.session["user_data"] = user_data
+        #
         return user_data
     return None
 
@@ -293,6 +286,7 @@ app = flask.Flask(__name__, static_folder=str(static_path), static_url_path="")
 # app.debug = True
 
 otel_setup(app)
+log_setup(app)
 
 # Flask-Session
 app.config["SESSION_TYPE"] = "memcached"
@@ -539,6 +533,7 @@ def post_index():
         tempf.seek(0)
         imgdata = tempf.read()
 
+    app.logger.debug("%s", me)
     query = "INSERT INTO `posts` (`user_id`, `mime`, `imgdata`, `body`) VALUES (%s,%s,%s,%s)"
     cursor = db().cursor()
     cursor.execute(query, (me["id"], mime, imgdata, flask.request.form.get("body")))
@@ -558,13 +553,13 @@ def get_image(id, ext):
         flask.abort(404)
 
     # Memcacheでキャッシュ確認
-    cache_key = f"image:{id}"
-    cached_image = memcache().get(cache_key)
-    
-    if cached_image and isinstance(cached_image, dict):
-        # base64デコードして画像データを復元
-        imgdata = base64.b64decode(cached_image["imgdata"])
-        return flask.Response(imgdata, mimetype=cached_image["mime"])
+    # cache_key = f"image:{id}"
+    # cached_image = memcache().get(cache_key)
+    # 
+    # if cached_image and isinstance(cached_image, dict):
+    #     # base64デコードして画像データを復元
+    #     imgdata = base64.b64decode(cached_image["imgdata"])
+    #     return flask.Response(imgdata, mimetype=cached_image["mime"])
 
     cursor = db().cursor()
     cursor.execute("SELECT `mime`, `imgdata` FROM `posts` WHERE `id` = %s", (id,))
@@ -579,12 +574,12 @@ def get_image(id, ext):
         or ext == "png" and mime == "image/png"
         or ext == "gif" and mime == "image/gif"
     ):
-        # 画像データをbase64エンコードしてMemcacheにキャッシュ（1時間）
-        cache_data = {
-            "imgdata": base64.b64encode(post["imgdata"]).decode('utf-8'),
-            "mime": mime
-        }
-        memcache().set(cache_key, cache_data, expire=3600)
+        # # 画像データをbase64エンコードしてMemcacheにキャッシュ（1時間）
+        # cache_data = {
+        #     "imgdata": base64.b64encode(post["imgdata"]).decode('utf-8'),
+        #     "mime": mime
+        # }
+        # memcache().set(cache_key, cache_data, expire=3600)
         
         return flask.Response(post["imgdata"], mimetype=mime)
 
