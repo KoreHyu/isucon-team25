@@ -177,7 +177,7 @@ def digest(src: str, is_new_user=False):
 
 
 def calculate_salt(account_name: str):
-    return digest(account_name, is_new_user)
+    return digest(account_name)
 
 
 def calculate_passhash(account_name: str, password: str, is_new_user=False):
