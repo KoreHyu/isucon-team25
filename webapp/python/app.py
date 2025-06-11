@@ -166,9 +166,21 @@ def calculate_passhash(account_name: str, password: str):
 def get_session_user():
     user = flask.session.get("user")
     if user:
+        # セッションにキャッシュされたユーザー情報があるかチェック
+        cached_user = flask.session.get("user_data")
+        if cached_user:
+            return cached_user
+            
+        # キャッシュがない場合のみDBアクセス
         cur = db().cursor()
         cur.execute("SELECT * FROM `users` WHERE `id` = %s", (user["id"],))
-        return cur.fetchone()
+        user_data = cur.fetchone()
+        
+        # セッションにキャッシュ
+        if user_data:
+            flask.session["user_data"] = user_data
+        
+        return user_data
     return None
 
 
@@ -201,19 +213,16 @@ def make_posts(results, all_comments=False):
             (post_ids,)
         )
     else:
-        # 各投稿の最新3件のコメントを取得
+        # 各投稿の最新3件のコメントを取得（ROW_NUMBER()を使用）
         cursor.execute("""
-            SELECT c.* FROM (
-                SELECT *,
-                       @row_number := CASE 
-                           WHEN @prev_post_id = post_id THEN @row_number + 1 
-                           ELSE 1 
-                       END AS rn,
-                       @prev_post_id := post_id
-                FROM comments, (SELECT @row_number := 0, @prev_post_id := '') AS r
+            SELECT * FROM (
+                SELECT c.*,
+                       ROW_NUMBER() OVER (PARTITION BY post_id ORDER BY created_at DESC) as rn
+                FROM comments c
                 WHERE post_id IN %s
-                ORDER BY post_id, created_at DESC
-            ) c WHERE c.rn <= 3
+            ) ranked
+            WHERE rn <= 3
+            ORDER BY post_id, created_at DESC
         """, (post_ids,))
     
     # コメントをpost_id別に分類し、ユーザーIDを収集
@@ -325,6 +334,7 @@ def post_login():
     user = try_login(flask.request.form["account_name"], flask.request.form["password"])
     if user:
         flask.session["user"] = {"id": user["id"]}
+        flask.session["user_data"] = user  # ユーザー情報をキャッシュ
         flask.session["csrf_token"] = os.urandom(8).hex()
         return flask.redirect("/")
 
@@ -397,7 +407,7 @@ def get_user_list(account_name):
     )
     user = cursor.fetchone()
     if user is None:
-        flask.abort(404)  # raises exception
+        flask.abort(404)
 
     cursor.execute(
         "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `user_id` = %s ORDER BY `created_at` DESC LIMIT %s",
@@ -405,18 +415,23 @@ def get_user_list(account_name):
     )
     posts = make_posts(cursor.fetchall())
 
-    # 統計情報を1つのクエリで取得
+    # 統計情報を効率的に取得
     cursor.execute("""
         SELECT 
-            (SELECT COUNT(*) FROM comments WHERE user_id = %s) as comment_count,
-            (SELECT COUNT(*) FROM posts WHERE user_id = %s) as post_count,
-            (SELECT COUNT(*) FROM comments c JOIN posts p ON c.post_id = p.id WHERE p.user_id = %s) as commented_count
-    """, (user["id"], user["id"], user["id"]))
+            COUNT(DISTINCT c.id) as comment_count,
+            COUNT(DISTINCT p.id) as post_count,
+            COUNT(DISTINCT c2.id) as commented_count
+        FROM users u
+        LEFT JOIN comments c ON u.id = c.user_id
+        LEFT JOIN posts p ON u.id = p.user_id
+        LEFT JOIN comments c2 ON p.id = c2.post_id
+        WHERE u.id = %s
+    """, (user["id"],))
     
     stats = cursor.fetchone()
-    comment_count = stats["comment_count"]
-    post_count = stats["post_count"]
-    commented_count = stats["commented_count"]
+    comment_count = stats["comment_count"] or 0
+    post_count = stats["post_count"] or 0
+    commented_count = stats["commented_count"] or 0
 
     me = get_session_user()
 
@@ -519,19 +534,29 @@ def get_image(id, ext):
     if id == 0:
         return ""
 
+    # Memcacheでキャッシュ確認
+    cache_key = f"image:{id}"
+    cached_image = memcache().get(cache_key)
+    
+    if cached_image:
+        return flask.Response(cached_image["imgdata"], mimetype=cached_image["mime"])
+
     cursor = db().cursor()
-    cursor.execute("SELECT * FROM `posts` WHERE `id` = %s", (id,))
+    cursor.execute("SELECT `mime`, `imgdata` FROM `posts` WHERE `id` = %s", (id,))
     post = cursor.fetchone()
+    
+    if not post:
+        flask.abort(404)
 
     mime = post["mime"]
     if (
-        ext == "jpg"
-        and mime == "image/jpeg"
-        or ext == "png"
-        and mime == "image/png"
-        or ext == "gif"
-        and mime == "image/gif"
+        ext == "jpg" and mime == "image/jpeg"
+        or ext == "png" and mime == "image/png"
+        or ext == "gif" and mime == "image/gif"
     ):
+        # Memcacheにキャッシュ（1時間）
+        memcache().set(cache_key, {"imgdata": post["imgdata"], "mime": mime}, expire=3600)
+        
         return flask.Response(post["imgdata"], mimetype=mime)
 
     flask.abort(404)
