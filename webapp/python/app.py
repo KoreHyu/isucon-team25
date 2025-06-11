@@ -330,6 +330,11 @@ def nl2br(eval_ctx, value):
 @app.route("/initialize")
 def get_initialize():
     db_initialize()
+    
+    # 画像ディレクトリを作成
+    image_dir = pathlib.Path(__file__).resolve().parent.parent / "public" / "images"
+    image_dir.mkdir(exist_ok=True)
+    
     return ""
 
 
@@ -539,6 +544,63 @@ def post_index():
     cursor.execute(query, (me["id"], mime, imgdata, flask.request.form.get("body")))
     pid = cursor.lastrowid
     return flask.redirect("/posts/%d" % pid)
+
+@app.route("/admin/export-images", methods=["POST"])
+def export_images():
+    """全ての画像をDBから取得してファイルシステムに保存するAPI"""
+    me = get_session_user()
+    if not me:
+        return flask.redirect("/login")
+
+    if flask.request.form["csrf_token"] != flask.session["csrf_token"]:
+        flask.abort(422)
+
+    try:
+        # 画像保存ディレクトリを作成
+        image_dir = "/tmp/images"
+        os.makedirs(image_dir, exist_ok=True)
+        
+        cursor = db().cursor()
+        cursor.execute("SELECT `id`, `mime`, `imgdata` FROM `posts` ORDER BY `id`")
+        posts = cursor.fetchall()
+        
+        exported_count = 0
+        for post in posts:
+            post_id = post["id"]
+            mime = post["mime"]
+            imgdata = post["imgdata"]
+            
+            # ファイル拡張子を決定
+            ext = ""
+            if mime == "image/jpeg":
+                ext = ".jpg"
+            elif mime == "image/png":
+                ext = ".png"
+            elif mime == "image/gif":
+                ext = ".gif"
+            else:
+                continue
+                
+            # ファイルパスを作成
+            image_path = image_dir + "/" + f"{post_id}{ext}"
+            
+            # 既にファイルが存在する場合はスキップ
+            if os.path.exists(image_path):
+                continue
+                
+            # 画像ファイルを保存
+            with open(image_path, 'wb') as f:
+                f.write(imgdata)
+            exported_count += 1
+        
+        app.logger.info(f"Exported {exported_count} images to filesystem")
+        flask.flash(f"{exported_count}個の画像をファイルシステムに保存しました")
+        
+    except Exception as e:
+        app.logger.error(f"Error exporting images: {str(e)}")
+        flask.flash("画像の保存中にエラーが発生しました")
+    
+    return flask.redirect("/admin/banned")
 
 
 @app.route("/image/<id>.<ext>")
