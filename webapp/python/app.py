@@ -543,6 +543,36 @@ def post_index():
     cursor = db().cursor()
     cursor.execute(query, (me["id"], mime, imgdata, flask.request.form.get("body")))
     pid = cursor.lastrowid
+    
+    # 画像をローカルファイルシステムにも保存
+    try:
+        # 画像保存ディレクトリを作成
+        image_dir = "/tmp/upload_images"
+        os.makedirs(image_dir, exist_ok=True)
+        
+        # ファイル拡張子を決定
+        ext = ""
+        if mime == "image/jpeg":
+            ext = ".jpg"
+        elif mime == "image/png":
+            ext = ".png"
+        elif mime == "image/gif":
+            ext = ".gif"
+        
+        if ext:  # 有効な拡張子の場合のみ保存
+            # ファイルパスを作成
+            image_path = os.path.join(image_dir, f"{pid}{ext}")
+            
+            # 画像ファイルを保存
+            with open(image_path, 'wb') as f:
+                f.write(imgdata)
+            
+            app.logger.info(f"Saved image to filesystem: {image_path}")
+        
+    except Exception as e:
+        app.logger.error(f"Error saving image to filesystem: {str(e)}")
+        # ファイルシステムへの保存が失敗してもアップロード自体は成功させる
+    
     return flask.redirect("/posts/%d" % pid)
 
 @app.route("/admin/export-images", methods=["POST"])
