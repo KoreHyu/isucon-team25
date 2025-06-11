@@ -405,7 +405,7 @@ def post_register():
         return flask.redirect("/register")
 
     query = "INSERT INTO `users` (`account_name`, `passhash`) VALUES (%s, %s)"
-    cursor.execute(query, (account_name, "NEWUSER" + calculate_passhash(account_name, password)))
+    cursor.execute(query, (account_name, calculate_passhash(account_name, password)))
 
     flask.session["user"] = {"id": cursor.lastrowid}
     flask.session["csrf_token"] = os.urandom(8).hex()
