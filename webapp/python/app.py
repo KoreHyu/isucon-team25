@@ -5,6 +5,8 @@ import re
 import shlex
 import subprocess
 import tempfile
+import json
+import base64
 
 import flask
 import MySQLdb.cursors
@@ -82,9 +84,27 @@ def memcache():
     if _mcclient is None:
         conf = config()["memcache"]
         _mcclient = MemcacheClient(
-            conf["address"], no_delay=True, default_noreply=False
+            conf["address"], 
+            no_delay=True, 
+            default_noreply=False,
+            serializer=json_serializer,
+            deserializer=json_deserializer
         )
     return _mcclient
+
+
+def json_serializer(key, value):
+    if isinstance(value, str):
+        return value.encode('utf-8'), 1
+    return json.dumps(value).encode('utf-8'), 2
+
+
+def json_deserializer(key, value, flags):
+    if flags == 1:
+        return value.decode('utf-8')
+    if flags == 2:
+        return json.loads(value.decode('utf-8'))
+    return value
 
 from opentelemetry import trace, metrics
 from opentelemetry.sdk.resources import Resource
@@ -530,16 +550,21 @@ def post_index():
 def get_image(id, ext):
     if not id:
         return ""
-    id = int(id)
-    if id == 0:
-        return ""
+    try:
+        id = int(id)
+        if id == 0:
+            return ""
+    except (ValueError, TypeError):
+        flask.abort(404)
 
     # Memcacheでキャッシュ確認
     cache_key = f"image:{id}"
     cached_image = memcache().get(cache_key)
     
-    if cached_image:
-        return flask.Response(cached_image["imgdata"], mimetype=cached_image["mime"])
+    if cached_image and isinstance(cached_image, dict):
+        # base64デコードして画像データを復元
+        imgdata = base64.b64decode(cached_image["imgdata"])
+        return flask.Response(imgdata, mimetype=cached_image["mime"])
 
     cursor = db().cursor()
     cursor.execute("SELECT `mime`, `imgdata` FROM `posts` WHERE `id` = %s", (id,))
@@ -554,8 +579,12 @@ def get_image(id, ext):
         or ext == "png" and mime == "image/png"
         or ext == "gif" and mime == "image/gif"
     ):
-        # Memcacheにキャッシュ（1時間）
-        memcache().set(cache_key, {"imgdata": post["imgdata"], "mime": mime}, expire=3600)
+        # 画像データをbase64エンコードしてMemcacheにキャッシュ（1時間）
+        cache_data = {
+            "imgdata": base64.b64encode(post["imgdata"]).decode('utf-8'),
+            "mime": mime
+        }
+        memcache().set(cache_key, cache_data, expire=3600)
         
         return flask.Response(post["imgdata"], mimetype=mime)
 
