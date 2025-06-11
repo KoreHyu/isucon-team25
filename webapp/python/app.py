@@ -159,7 +159,7 @@ def validate_user(account_name: str, password: str):
 
 
 def digest(src: str):
-    src_byte = src.encode('utf-8')
+    src_bytes = src.encode('utf-8')
     hased_str = hashlib.sha512(src_bytes).hexdigest()
     return hased_str.strip()
 
