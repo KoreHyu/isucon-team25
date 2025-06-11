@@ -145,6 +145,9 @@ def try_login(account_name, password):
     )
     user = cur.fetchone()
 
+    if not user:
+        return None
+    
     user_correct_pass = user["passhash"]
 
     is_new_user = False
