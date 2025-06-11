@@ -547,7 +547,7 @@ def post_index():
     # 画像をローカルファイルシステムにも保存
     try:
         # 画像保存ディレクトリを作成
-        image_dir = "/tmp/upload_images"
+        image_dir = "/home/isucon/upload_images"
         os.makedirs(image_dir, exist_ok=True)
         
         # ファイル拡張子を決定
