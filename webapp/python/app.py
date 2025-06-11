@@ -1,5 +1,6 @@
 import datetime
 import os
+import time
 import pathlib
 import re
 import shlex
@@ -355,6 +356,10 @@ def post_login():
         return flask.redirect("/")
 
     user = try_login(flask.request.form["account_name"], flask.request.form["password"])
+    
+    # ログイン処理を意図的に遅延させてCPUリソース競合を回避
+    time.sleep(0.2)  # 200ms遅延
+    
     if user:
         flask.session["user"] = {"id": user["id"]}
         flask.session["user_data"] = user  # ユーザー情報をキャッシュ
