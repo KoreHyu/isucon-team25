@@ -16,7 +16,6 @@ from jinja2 import pass_eval_context
 from markupsafe import Markup, escape
 from pymemcache.client.base import Client as MemcacheClient
 
-MySQLInstrumentor().instrument()
 UPLOAD_LIMIT = 10 * 1024 * 1024  # 10mb
 POSTS_PER_PAGE = 20
 
@@ -103,6 +102,8 @@ from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExport
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
 from opentelemetry.instrumentation.mysql import MySQLInstrumentor
+
+MySQLInstrumentor().instrument()
 
 def otel_setup(app):
     resource = Resource.create({"service.name": "isuconp"})
