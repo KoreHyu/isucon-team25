@@ -148,7 +148,7 @@ def try_login(account_name, password):
     user_correct_pass = user["passhash"]
 
     is_new_user = False
-    if user_correct_pass.index("NEWUSER") == 0:
+    if user_correct_pass.find("NEWUSER") == 0:
         is_new_user = True
 
     if user and user_correct_pass == calculate_passhash(user["account_name"], password, is_new_user):
@@ -176,11 +176,11 @@ def digest(src: str, is_new_user=False):
     return hased_str
 
 
-def calculate_salt(account_name: str, is_new_user):
+def calculate_salt(account_name: str):
     return digest(account_name, is_new_user)
 
 
-def calculate_passhash(account_name: str, password: str, is_new_user):
+def calculate_passhash(account_name: str, password: str, is_new_user=False):
     return digest(f"{password}:{calculate_salt(account_name)}", is_new_user)
 
 
