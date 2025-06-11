@@ -145,7 +145,13 @@ def try_login(account_name, password):
     )
     user = cur.fetchone()
 
-    if user and calculate_passhash(user["account_name"], password) == user["passhash"]:
+    user_correct_pass = user["passhash"]
+
+    is_new_user = False
+    if user_correct_pass.index("NEWUSER") == 0:
+        is_new_user = True
+
+    if user and user_correct_pass == calculate_passhash(user["account_name"], password, is_new_user):
         return user
     return None
 
@@ -158,18 +164,24 @@ def validate_user(account_name: str, password: str):
     return True
 
 
-def digest(src: str):
+def digest(src: str, is_new_user=False):
     src_bytes = src.encode('utf-8')
-    hased_str = hashlib.sha512(src_bytes).hexdigest()
-    return hased_str.strip()
+
+    if is_new_user:
+        hashed_str = hashlib.sha1(src_bytes).hexdigest().strip()
+        hased_str = "NEWUSER" + hased_str
+    else:
+        hased_str = hashlib.sha512(src_bytes).hexdigest().strip()
+    
+    return hased_str
 
 
-def calculate_salt(account_name: str):
-    return digest(account_name)
+def calculate_salt(account_name: str, is_new_user):
+    return digest(account_name, is_new_user)
 
 
-def calculate_passhash(account_name: str, password: str):
-    return digest("%s:%s" % (password, calculate_salt(account_name)))
+def calculate_passhash(account_name: str, password: str, is_new_user):
+    return digest(f"{password}:{calculate_salt(account_name)}", is_new_user)
 
 
 def get_session_user():
@@ -393,7 +405,7 @@ def post_register():
         return flask.redirect("/register")
 
     query = "INSERT INTO `users` (`account_name`, `passhash`) VALUES (%s, %s)"
-    cursor.execute(query, (account_name, calculate_passhash(account_name, password)))
+    cursor.execute(query, (account_name, "NEWUSER" + calculate_passhash(account_name, password)))
 
     flask.session["user"] = {"id": cursor.lastrowid}
     flask.session["csrf_token"] = os.urandom(8).hex()
