@@ -16,6 +16,7 @@ from jinja2 import pass_eval_context
 from markupsafe import Markup, escape
 from pymemcache.client.base import Client as MemcacheClient
 
+MySQLInstrumentor().instrument()
 UPLOAD_LIMIT = 10 * 1024 * 1024  # 10mb
 POSTS_PER_PAGE = 20
 
@@ -116,19 +117,7 @@ def otel_setup(app):
     )
     trace.set_tracer_provider(tracer_provider)
 
-    metric_exporter = OTLPMetricExporter(
-        endpoint=config()['otel']['endpoint'],
-        insecure=config()['otel']['insecure'],
-    )
-    reader = PeriodicExportingMetricReader(
-        metric_exporter,
-        export_interval_millis=config()['otel']['export_interval_millis']
-    )
-    meter_provider = MeterProvider(metric_readers=[reader], resource=resource)
-    metrics.set_meter_provider(meter_provider)
-
     FlaskInstrumentor().instrument_app(app)
-    MySQLInstrumentor().instrument()
 
 def log_setup(app):
     handler = logging.StreamHandler()
