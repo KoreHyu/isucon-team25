@@ -35,6 +35,11 @@ def config():
                     "ISUCONP_MEMCACHED_ADDRESS", "127.0.0.1:11211"
                 ),
             },
+            'otel': {
+                'endpoint': os.getenv('OTEL_ENDPOINT', '18.183.232.7:4317'),
+                'insecure': True,
+                'export_interval_millis': int(os.getenv('OTEL_EXPORT_INTERVAL_MS', '5000')),
+            },
         }
         password = os.environ.get("ISUCONP_DB_PASSWORD")
         if password:
@@ -80,6 +85,37 @@ def memcache():
             conf["address"], no_delay=True, default_noreply=False
         )
     return _mcclient
+
+from opentelemetry.instrumentation.flask import FlaskInstrumentor
+from opentelemetry.instrumentation.mysql import MySQLInstrumentor
+from opentelemetry.instrumentation.requests import RequestsInstrumentor
+
+def otel_setup(app):
+    resource = Resource.create({"service.name": "isuconp"})
+    tracer_provider = TracerProvider(resource=resource)
+    tracer_provider.add_span_processor(
+        BatchSpanProcessor(
+            OTLPSpanExporter(
+                endpoint=config()['otel']['endpoint'],
+                insecure=config()['otel']['insecure'],
+            )
+        )
+    )
+    trace.set_tracer_provider(tracer_provider)
+
+    metric_exporter = OTLPMetricExporter(
+        endpoint=config()['otel']['endpoint'],
+        insecure=config()['otel']['insecure'],
+    )
+    reader = PeriodicExportingMetricReader(
+        metric_exporter,
+        export_interval_millis=config()['otel']['export_interval_millis']
+    )
+    meter_provider = MeterProvider(metric_readers=[reader], resource=resource)
+    metrics.set_meter_provider(meter_provider)
+
+    FlaskInstrumentor().instrument_app(app)
+    MySQLInstrumentor().instrument()
 
 
 def try_login(account_name, password):
@@ -170,6 +206,8 @@ def make_posts(results, all_comments=False):
 static_path = pathlib.Path(__file__).resolve().parent.parent / "public"
 app = flask.Flask(__name__, static_folder=str(static_path), static_url_path="")
 # app.debug = True
+
+otel_setup(app)
 
 # Flask-Session
 app.config["SESSION_TYPE"] = "memcached"
