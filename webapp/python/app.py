@@ -130,39 +130,88 @@ def get_session_user():
 
 
 def make_posts(results, all_comments=False):
+    if not results:
+        return []
+    
     posts = []
     cursor = db().cursor()
-    for post in results:
+    
+    # 投稿IDとユーザーIDを事前に収集
+    post_ids = [post["id"] for post in results]
+    user_ids = list(set(post["user_id"] for post in results))
+    
+    # ユーザー情報を一括取得
+    cursor.execute("SELECT * FROM `users` WHERE `id` IN %s", (user_ids,))
+    users_dict = {user["id"]: user for user in cursor.fetchall()}
+    
+    # コメント数を一括取得
+    cursor.execute(
+        "SELECT post_id, COUNT(*) as count FROM comments WHERE post_id IN %s GROUP BY post_id",
+        (post_ids,)
+    )
+    comment_counts = {row["post_id"]: row["count"] for row in cursor.fetchall()}
+    
+    # コメント情報を一括取得
+    if all_comments:
         cursor.execute(
-            "SELECT COUNT(*) AS `count` FROM `comments` WHERE `post_id` = %s",
-            (post["id"],),
+            "SELECT * FROM comments WHERE post_id IN %s ORDER BY post_id, created_at DESC",
+            (post_ids,)
         )
-        post["comment_count"] = cursor.fetchone()["count"]
-
-        query = (
-            "SELECT * FROM `comments` WHERE `post_id` = %s ORDER BY `created_at` DESC"
-        )
-        if not all_comments:
-            query += " LIMIT 3"
-
-        cursor.execute(query, (post["id"],))
-        comments = list(cursor)
+    else:
+        # 各投稿の最新3件のコメントを取得
+        cursor.execute("""
+            SELECT c.* FROM (
+                SELECT *,
+                       @row_number := CASE 
+                           WHEN @prev_post_id = post_id THEN @row_number + 1 
+                           ELSE 1 
+                       END AS rn,
+                       @prev_post_id := post_id
+                FROM comments, (SELECT @row_number := 0, @prev_post_id := '') AS r
+                WHERE post_id IN %s
+                ORDER BY post_id, created_at DESC
+            ) c WHERE c.rn <= 3
+        """, (post_ids,))
+    
+    # コメントをpost_id別に分類し、ユーザーIDを収集
+    comments_by_post = {}
+    comment_user_ids = set()
+    for comment in cursor.fetchall():
+        post_id = comment["post_id"]
+        if post_id not in comments_by_post:
+            comments_by_post[post_id] = []
+        comments_by_post[post_id].append(comment)
+        comment_user_ids.add(comment["user_id"])
+    
+    # コメントユーザー情報を一括取得
+    if comment_user_ids:
+        cursor.execute("SELECT * FROM `users` WHERE `id` IN %s", (list(comment_user_ids),))
+        comment_users_dict = {user["id"]: user for user in cursor.fetchall()}
+    else:
+        comment_users_dict = {}
+    
+    # データを組み立て
+    for post in results:
+        post["comment_count"] = comment_counts.get(post["id"], 0)
+        post["user"] = users_dict.get(post["user_id"])
+        
+        if not post["user"]:
+            continue
+            
+        comments = comments_by_post.get(post["id"], [])
         for comment in comments:
-            cursor.execute(
-                "SELECT * FROM `users` WHERE `id` = %s", (comment["user_id"],)
-            )
-            comment["user"] = cursor.fetchone()
-        comments.reverse()
+            comment["user"] = comment_users_dict.get(comment["user_id"])
+        
+        if not all_comments:
+            comments.reverse()
         post["comments"] = comments
-
-        cursor.execute("SELECT * FROM `users` WHERE `id` = %s", (post["user_id"],))
-        post["user"] = cursor.fetchone()
-
+        
         if not post["user"]["del_flg"]:
             posts.append(post)
-
+        
         if len(posts) >= POSTS_PER_PAGE:
             break
+    
     return posts
 
 
@@ -285,7 +334,8 @@ def get_index():
 
     cursor = db().cursor()
     cursor.execute(
-        "SELECT `id`, `user_id`, `body`, `created_at`, `mime` FROM `posts` ORDER BY `created_at` DESC"
+        "SELECT `id`, `user_id`, `body`, `created_at`, `mime` FROM `posts` ORDER BY `created_at` DESC LIMIT %s",
+        (POSTS_PER_PAGE * 2,)
     )
     posts = make_posts(cursor.fetchall())
 
@@ -305,27 +355,23 @@ def get_user_list(account_name):
         flask.abort(404)  # raises exception
 
     cursor.execute(
-        "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `user_id` = %s ORDER BY `created_at` DESC",
-        (user["id"],),
+        "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `user_id` = %s ORDER BY `created_at` DESC LIMIT %s",
+        (user["id"], POSTS_PER_PAGE)
     )
     posts = make_posts(cursor.fetchall())
 
-    cursor.execute(
-        "SELECT COUNT(*) AS count FROM `comments` WHERE `user_id` = %s", (user["id"],)
-    )
-    comment_count = cursor.fetchone()["count"]
-
-    cursor.execute("SELECT `id` FROM `posts` WHERE `user_id` = %s", (user["id"],))
-    post_ids = [p["id"] for p in cursor]
-    post_count = len(post_ids)
-
-    commented_count = 0
-    if post_count > 0:
-        cursor.execute(
-            "SELECT COUNT(*) AS count FROM `comments` WHERE `post_id` IN %s",
-            (post_ids,),
-        )
-        commented_count = cursor.fetchone()["count"]
+    # 統計情報を1つのクエリで取得
+    cursor.execute("""
+        SELECT 
+            (SELECT COUNT(*) FROM comments WHERE user_id = %s) as comment_count,
+            (SELECT COUNT(*) FROM posts WHERE user_id = %s) as post_count,
+            (SELECT COUNT(*) FROM comments c JOIN posts p ON c.post_id = p.id WHERE p.user_id = %s) as commented_count
+    """, (user["id"], user["id"], user["id"]))
+    
+    stats = cursor.fetchone()
+    comment_count = stats["comment_count"]
+    post_count = stats["post_count"]
+    commented_count = stats["commented_count"]
 
     me = get_session_user()
 
@@ -361,7 +407,8 @@ def get_posts():
         )
     else:
         cursor.execute(
-            "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE ORDER BY `created_at` DESC"
+            "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` ORDER BY `created_at` DESC LIMIT %s",
+            (POSTS_PER_PAGE * 2,)
         )
     results = cursor.fetchall()
     posts = make_posts(results)
