@@ -331,9 +331,17 @@ def nl2br(eval_ctx, value):
 def get_initialize():
     db_initialize()
     
-    # 画像ディレクトリを作成
-    image_dir = pathlib.Path(__file__).resolve().parent.parent / "public" / "images"
-    image_dir.mkdir(exist_ok=True)
+    # 既存の画像保存ディレクトリの中身を削除
+    upload_image_dir = "/home/isucon/upload_images"
+    # ディレクトリ内のファイルを削除（画像ファイルのみ想定）
+    for filename in os.listdir(upload_image_dir):
+        file_path = os.path.join(upload_image_dir, filename)
+        os.remove(file_path)
+    app.logger.info(f"Cleared contents of upload image directory: {upload_image_dir}")
+    
+    # publicディレクトリも念のため作成
+    public_image_dir = pathlib.Path(__file__).resolve().parent.parent / "public" / "images"
+    public_image_dir.mkdir(exist_ok=True)
     
     return ""
 
