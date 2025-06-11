@@ -404,7 +404,7 @@ def get_index():
     cursor = db().cursor()
     cursor.execute(
         "SELECT `id`, `user_id`, `body`, `created_at`, `mime` FROM `posts` ORDER BY `created_at` DESC LIMIT %s",
-        (POSTS_PER_PAGE * 2,)
+        (POSTS_PER_PAGE,)
     )
     posts = make_posts(cursor.fetchall())
 
@@ -476,13 +476,13 @@ def get_posts():
     if max_created_at:
         max_created_at = _parse_iso8601(max_created_at)
         cursor.execute(
-            "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `created_at` <= %s ORDER BY `created_at` DESC",
-            (max_created_at,),
+            "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` WHERE `created_at` <= %s ORDER BY `created_at` DESC LIMIT %s",
+            (max_created_at, POSTS_PER_PAGE,),
         )
     else:
         cursor.execute(
             "SELECT `id`, `user_id`, `body`, `mime`, `created_at` FROM `posts` ORDER BY `created_at` DESC LIMIT %s",
-            (POSTS_PER_PAGE * 2,)
+            (POSTS_PER_PAGE,)
         )
     results = cursor.fetchall()
     posts = make_posts(results)
@@ -493,7 +493,7 @@ def get_posts():
 def get_posts_id(id):
     cursor = db().cursor()
 
-    cursor.execute("SELECT * FROM `posts` WHERE `id` = %s", (id,))
+    cursor.execute("SELECT * FROM `posts` WHERE `id` = %s LIMIT %s", (id, POSTS_PER_PAGE))
     posts = make_posts(cursor.fetchall(), all_comments=True)
     if not posts:
         flask.abort(404)
